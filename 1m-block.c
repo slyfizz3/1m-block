@@ -9,11 +9,47 @@
 #include <string.h>
 #include <libnetfilter_queue/libnetfilter_queue.h>
 
-char *host;
+
+#define TABLE_SIZE 1000000
+#define MAX_LINE_LENGTH 1000
+
+typedef struct node {
+    char *string;
+    struct node *next;
+} Node;
+
+Node *hash_table[TABLE_SIZE];
+
+unsigned long hash_string(const char *str) {
+    unsigned long hash = 5381;
+    int c;
+    while ((c = *str++))
+        hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
+    return hash;
+}
+
+void insert_string(const char *str) {
+    unsigned long index = hash_string(str) % TABLE_SIZE;
+    Node *node = (Node*)malloc(sizeof(Node));
+    node->string = strdup(str);
+    node->next = hash_table[index];
+    hash_table[index] = node;
+}
+
+int find_string(const char *str) {
+    unsigned long index = hash_string(str) % TABLE_SIZE;
+    Node *node = hash_table[index];
+    while (node) {
+        if (strcmp(node->string, str) == 0)
+            return 1;
+        node = node->next;
+    }
+    return 0;
+}
 
 void usage() {
-	printf("syntax : netfilter-test <host>\n");
-	printf("sample : netfilter-test test.gilgil.net\n");
+	printf("syntax : 1m-block <site list file>\n");
+	printf("sample : 1m-block top-1m.txt\n");
 }
 
 int is_http_packet(char*packet) {
@@ -28,6 +64,29 @@ int is_http_packet(char*packet) {
     return 0;
 }
 
+
+char* get_host_value(const char* str) {
+    const char* host_start = memchr(str, 'H', strlen(str));
+    while (host_start != NULL) {
+        if (strncmp(host_start, "Host: ", 5) == 0) {
+            host_start += 5;
+            break;
+        }
+        host_start = memchr(host_start + 1, 'H', strlen(host_start + 1));
+    }
+
+    if (host_start == NULL) {
+        return NULL;
+    }
+
+    const char* host_end = strchr(host_start, '\0');
+    size_t host_len = host_end - host_start;
+    char* host_value = malloc(host_len + 1);
+    memcpy(host_value, host_start, host_len);
+    host_value[host_len] = '\0';
+
+    return host_value;
+}
 
 int check_dangerous_site(struct nfq_data *tb){
 	struct nfqnl_msg_packet_hdr *ph;
@@ -58,10 +117,9 @@ int check_dangerous_site(struct nfq_data *tb){
 			char* http_header;
 			http_header = (data+data_idx);
 			if(is_http_packet(http_header)){
-				if (strstr(http_header,host)!=NULL){
-					printf("!!dangerous site filtered!!!\n");
-					drop_check=NF_DROP;
-				}
+				char *host=get_host_value(http_header);
+				puts(host);
+				
 				
 			}
 
@@ -94,7 +152,27 @@ int main(int argc, char **argv)
 		return -1;
 	}
 	
-	host = argv[1];
+	char *file = argv[1];
+	
+	FILE *fp;
+	char line[MAX_LINE_LENGTH];
+	fp = fopen(file, "r");
+	if (fp == NULL) {
+		printf("Failed to open file\n");
+        	return 1;
+    	}
+    	 //init hash table
+    	memset(hash_table, 0, sizeof(hash_table));
+
+   	 //insert stirng to hash table
+    	while (fgets(line, MAX_LINE_LENGTH, fp)) {
+        	char *comma = strchr(line, ',');
+       	 	if (comma == NULL) {
+            		printf("Invalid input format: %s", line);
+            		continue;
+        	}
+        	insert_string(comma + 1);
+    	}
 	
 	struct nfq_handle *h;
 	struct nfq_q_handle *qh;
