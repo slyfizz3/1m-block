@@ -69,21 +69,21 @@ char* get_host_value(const char* str) {
     const char* host_start = memchr(str, 'H', strlen(str));
     while (host_start != NULL) {
         if (strncmp(host_start, "Host: ", 5) == 0) {
-            host_start += 5;
+            host_start += 6;
             break;
         }
         host_start = memchr(host_start + 1, 'H', strlen(host_start + 1));
     }
-
+    
     if (host_start == NULL) {
         return NULL;
     }
 
-    const char* host_end = strchr(host_start, '\0');
+    const char* host_end = strchr(host_start, 0xd); //\r
     size_t host_len = host_end - host_start;
     char* host_value = malloc(host_len + 1);
     memcpy(host_value, host_start, host_len);
-    host_value[host_len] = '\0';
+    host_value[host_len] = '\x0a';
 
     return host_value;
 }
@@ -108,24 +108,22 @@ int check_dangerous_site(struct nfq_data *tb){
 	ip_header = (struct libnet_ipv4_hdr*) data;
 	data_idx += ip_header->ip_hl * 4;
 	
-	struct libnet_tcp_hdr* tcp_header;
-	tcp_header = (struct libnet_tcp_hdr*)(data+data_idx);
-	data_idx += tcp_header->th_off * 4;
-	
 	if (ip_header->ip_p == TCP_PROTOCOL){
+		struct libnet_tcp_hdr* tcp_header;
+		tcp_header = (struct libnet_tcp_hdr*)(data+data_idx);
+		data_idx += tcp_header->th_off * 4;
 		if(ntohs(tcp_header->th_dport) == http_port ){
-			char* http_header;
-			http_header = (data+data_idx);
+			char* http_header = (data+data_idx);
 			if(is_http_packet(http_header)){
 				char *host=get_host_value(http_header);
-				puts(host);
-				
-				
+				if (find_string(host)) {
+					printf("target : %s==> dangerous site!!\n",host);
+					drop_check=NF_DROP;
+				}
 			}
-
 		}
-	
-	}
+		
+    	}
 	return drop_check;
 }
 
